@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Wayfinding Demo</title>
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+		<script type="text/javascript" src="js/processing-1.2.3.min.js"></script>
+	<script type='text/javascript' src='js/graph.js'></script>
+	<script type='text/javascript' src='js/astar.js'></script>
+	<script type='text/javascript' src='js/qrcode.js'></script>
+	<script type="text/processing" data-processing-target="map">
+        /* @pjs preload="floorplan.png,floorplan-nav.png"; */
+
+      var result;
+      var gSize;
+      var ftSize;
+      Pimage navImg;
+      PImage mapImg;
+      var start;
+      var end;
+      var graph;
+      var grid;
+      var qrSize = 4;
+      var qrCode;
+
+      void setup() {
+	navImg = loadImage("floorplan-nav.png");
+   	mapImg = loadImage("floorplan.png");
+	navImg.loadPixels();
+	gSize = [mapImg.width/navImg.width,mapImg.height/navImg.height];
+	ftSize = mapImg.width/(mapImg.width/72*32); // 1:32 scale @ 72 DPI 
+	size(mapImg.width,mapImg.height);
+	grid = [];
+        for(var x=0;x<navImg.width;x++) {
+    		var gridRow = [];
+    		for(var y=0;y<navImg.height;y++) {
+    			if(brightness(navImg.pixels[y*navImg.width+x]) < 1) {
+				gridRow.push(1); //wall
+    			} else {
+				gridRow.push(0); //open
+			}
+    		}
+		grid.push(gridRow);
+	}
+	graph = new Graph(grid);
+	document.getElementById('message').onclick = redraw;
+	var uv = location.hash.replace('#','').split('/');
+	if(uv.length == 4){
+		var xA = uv[0]?uv[0]:0;
+		var yA = uv[1]?uv[1]:0;
+		var xB = uv[2]?uv[2]:0;
+		var yB = uv[3]?uv[3]:0;
+		if(xA || xB || yA || yB) findRoute(xA,yA,xB,yB);
+	}
+        noLoop();
+      }
+
+      void findRoute(xA,yA,xB,yB){
+	start = graph.nodes[xA][yA];
+	end = graph.nodes[xB][yB];
+	var startTime = new Date().getTime();
+	result = astar.search(graph.nodes,start,end);
+	var endTime = new Date().getTime();
+	if(!result || result.length == 0)	{
+	    document.getElementById('message').innerHTML = "couldn't find a path ("+(endTime-startTime)+"ms)";
+	    document.getElementById('distance').innerHTML = "";
+	}
+	else {
+	    document.getElementById('message').innerHTML = "search took: " + (endTime-startTime) + "ms.";
+	    document.getElementById('distance').innerHTML = "total distance: "+Math.round((result.length*gSize[0])/ftSize)+"'";
+	    location.hash = xA.toString()+"/"+yA+"/"+xB+"/"+yB;
+	    qrCode = new QRCode(6, QRErrorCorrectLevel.L);
+	    var urlBase = document.URL.split('#');
+	    qrCode.addData(urlBase[0]+'#'+location.hash.replace('#',''));   
+	    qrCode.make();
+	}
+      }
+
+      void draw() {
+	background(255);
+	if(document.getElementById('show-map').checked){
+		image(mapImg,0,0,mapImg.width,mapImg.height);
+	}
+	if(document.getElementById('wall-grid').checked){
+		stroke(0,0,255,50);
+		strokeWeight(0.5);
+		for(var y=0;y<navImg.height;y++) {
+			for(var x=0;x<navImg.width;x++) {
+				if(grid[x][y] == 1) {
+					fill(0,0,255,50);
+					rect(x*gSize[0],y*gSize[1],gSize[0],gSize[1]);
+				}
+			}
+		} 
+	}
+	if(result && result.length) {
+		//draw result grid
+		if(document.getElementById('result-grid').checked){
+			stroke(0,0,255,50);
+			fill(0,255,255,155);
+			strokeWeight(0.5);
+			for(int i=0; i<result.length;i++){ rect(result[i].x*gSize[0],result[i].y*gSize[1],gSize[0],gSize[1]); }
+		}
+		// draw spline curve
+		if(document.getElementById('path').checked){
+			noFill();
+			stroke(0); 
+			strokeWeight(3);
+			var v = [new GraphNode(start.x*gSize[0]+gSize[0]/2,start.y*gSize[1]+gSize[1]/2,1)];
+			for(int i=0;i<result.length-1;i+=4){
+				v.push(new GraphNode(result[i].x*gSize[0]+gSize[0]/2,result[i].y*gSize[1]+gSize[1]/2,1));
+			}
+			v.push(new GraphNode(end.x*gSize[0]+gSize[0]/2,end.y*gSize[1]+gSize[1]/2,1));
+			curve(v[0].x, v[0].y, v[0].x, v[0].y, v[1].x, v[1].y, v[2].x, v[2].y);
+			for (int i=0; i<v.length-3; i++){
+				curve(v[i].x, v[i].y, v[i+1].x, v[i+1].y, v[i+2].x, v[i+2].y, v[i+3].x, v[i+3].y);
+			}
+			curve(v[v.length-3].x, v[v.length-3].y, v[v.length-2].x, v[v.length-2].y, v[v.length-1].x, v[v.length-1].y, v[v.length-1].x, v[v.length-1].y);
+		}
+		//draw QR code
+		if(document.getElementById('qr-code').checked){
+			fill(0);
+			noStroke();
+			for (var y = 0; y < qrCode.getModuleCount(); y++) {	
+				for (var x = 0; x < qrCode.getModuleCount(); x++) {
+					if (qrCode.isDark(y,x) ) {
+						rect(x*qrSize,y*qrSize,qrSize,qrSize);	
+					}
+				}	
+			}
+		}
+	
+	}
+
+	//draw start/end points
+	if(document.getElementById('endpoints').checked){
+		stroke(0);
+		strokeWeight(2);
+		fill(0,255,0);
+		if(start) ellipse(start.x*gSize[0]+gSize[0]/2,start.y*gSize[1]+gSize[1]/2,gSize[0]*3,gSize[1]*3);
+		fill(255,0,0);
+		if(end) ellipse(end.x*gSize[0]+gSize[0]/2,end.y*gSize[1]+gSize[1]/2,gSize[0]*3,gSize[1]*3);
+	}
+	
+	window.redraw = redraw;
+}
+
+
+void mouseClicked() {
+	if(end) findRoute(end.x,end.y,Math.floor(mouseX/gSize[0]),Math.floor(mouseY/gSize[1]));
+	else end = graph.nodes[Math.floor(mouseX/gSize[0])][Math.floor(mouseY/gSize[1])];
+	redraw();
+}
+    </script>
+<style type="text/css">
+	*{outline:none}
+</style>
+</head>
+<body>
+
+	<div id="content">
+		<h2>Wayfinding Demo</h2>
+		<h3 id="message">Click two points to begin</h3>
+		Map: <input type="checkbox" id="show-map" checked onclick="redraw();"><br>
+		Wall Grid: <input type="checkbox" id="wall-grid" onclick="redraw();"><br>
+		Result Grid: <input type="checkbox" id="result-grid" onclick="redraw();"><br>
+		Endpoints: <input type="checkbox" id="endpoints" checked onclick="redraw();"><br>
+		Path: <input type="checkbox" id="path" checked onclick="redraw();"><br>
+		QR Code: <input type="checkbox" id="qr-code" checked onclick="redraw();"><br>				
+		<h3 id="distance">&nbsp;</h3>
+
+	    <div id="main">
+	    	<canvas id="map" width="1920" height="1415" style="border:1px dotted black"></canvas>	
+	    </div>
+
+	</div>
+</body>
+</html>
